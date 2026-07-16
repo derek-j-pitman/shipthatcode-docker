@@ -38,7 +38,7 @@ func main() {
 		switch parts[0] {
 		case "NEWNS":
 			// TODO: create new netns with lo 127.0.0.1; print id
-			namespaces = append(namespaces, Namespace{Ifaces: map[string]string{"lo": "127.0.0.1"}})
+			namespaces = append(namespaces, Namespace{Ifaces: map[string]string{"lo": "127.0.0.1"}, Routes: map[string]string{}})
 			out = append(out, strconv.Itoa(len(namespaces)))
 		case "IFACE-ADD":
 			// TODO: add interface; print OK
