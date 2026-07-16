@@ -3,30 +3,28 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"maps"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 )
 
-// PID Namespace Simulator
-// Each namespace gets its own PID counter starting at 1.
+// Mount Namespace Simulator
+// Each ns has its own mount table; new ns inherits parent ns 0's snapshot.
 // Commands:
-//   NEWNS  -> allocate next ns id, init empty process table, print id
-//   FORK <ns> <name>  -> spawn process; assign in-ns pid; print pid
-//   EXIT <ns> <pid>  -> mark exited; print OK
-//   PS <ns>  -> print '<pid> <name> <state>' sorted by pid
-
-type Process struct {
-	Name    string
-	Running bool
-}
+//   NEWNS  -> create new ns; snapshot ns 0's mounts; print id
+//   MOUNT <ns> <src> <dst>  -> add mount; print OK
+//   UMOUNT <ns> <dst>  -> remove mount; print OK
+//   LISTMOUNTS <ns>  -> print '<src> on <dst>' sorted by dst, or (empty)
 
 func main() {
 	sc := bufio.NewScanner(os.Stdin)
 	sc.Buffer(make([]byte, 1<<20), 1<<24)
 	var out []string
 	// TODO: declare your state structures here
-	var nsTable [][]Process
+	var mounts []map[string]string
+	mounts = append(mounts, make(map[string]string))
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" {
@@ -35,34 +33,41 @@ func main() {
 		parts := strings.Fields(line)
 		switch parts[0] {
 		case "NEWNS":
-			// TODO: allocate next ns id, init empty process table, print id
-			nsTable = append(nsTable, []Process{})
-			out = append(out, strconv.Itoa(len(nsTable)))
-		case "FORK":
-			// TODO: spawn process; assign in-ns pid; print pid
+			// TODO: create new ns; snapshot ns 0's mounts; print id
+			newNs := make(map[string]string)
+			maps.Copy(newNs, mounts[0])
+			mounts = append(mounts, newNs)
+			out = append(out, strconv.Itoa(len(mounts)-1))
+		case "MOUNT":
+			// TODO: add mount; print OK
 			nsId, _ := strconv.Atoi(parts[1])
-			nsTable[nsId-1] = append(nsTable[nsId-1], Process{parts[2], true})
-			out = append(out, strconv.Itoa(len(nsTable[nsId-1])))
-		case "EXIT":
-			// TODO: mark exited; print OK
-			nsId, _ := strconv.Atoi(parts[1])
-			pid, _ := strconv.Atoi(parts[2])
-			nsTable[nsId-1][pid-1].Running = false
+			srcMount := parts[2]
+			dstMount := parts[3]
+			mounts[nsId][dstMount] = srcMount
 			out = append(out, "OK")
-		case "PS":
-			// TODO: print '<pid> <name> <state>' sorted by pid
+		case "UMOUNT":
+			// TODO: remove mount; print OK
 			nsId, _ := strconv.Atoi(parts[1])
-			var processes []string
-			for i, v := range nsTable[nsId-1] {
-				var isRunning string
-				if v.Running {
-					isRunning = "running"
-				} else {
-					isRunning = "exited"
+			dstMount := parts[2]
+			delete(mounts[nsId], dstMount)
+			out = append(out, "OK")
+		case "LISTMOUNTS":
+			// TODO: print '<src> on <dst>' sorted by dst, or (empty)
+			nsId, _ := strconv.Atoi(parts[1])
+			if len(mounts[nsId]) == 0 {
+				out = append(out, "(empty)")
+			} else {
+				var points []string
+				var keys []string
+				for k := range mounts[nsId] {
+					keys = append(keys, k)
 				}
-				processes = append(processes, fmt.Sprintf("%d %s %s", i+1, v.Name, isRunning))
+				sort.Strings(keys)
+				for _, k := range keys {
+					points = append(points, fmt.Sprintf("%s on %s", mounts[nsId][k], k))
+				}
+				out = append(out, strings.Join(points, "\n"))
 			}
-			out = append(out, strings.Join(processes, "\n"))
 		}
 	}
 	fmt.Println(strings.Join(out, "\n"))
