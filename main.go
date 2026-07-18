@@ -84,7 +84,7 @@ func main() {
 			res := "unmapped"
 			for _, r := range namespaces[nsId-1] {
 				if hostId >= r.HostStart && hostId < r.HostStart+r.Length {
-					res = strconv.Itoa(r.InStart + hostId)
+					res = strconv.Itoa(hostId - r.HostStart)
 					break
 				}
 			}
