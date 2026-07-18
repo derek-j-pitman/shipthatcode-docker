@@ -72,6 +72,7 @@ func main() {
 				g.PTable[pid] -= toFree
 				g.Usage -= toFree
 			}
+			groups[parts[1]] = g
 			out = append(out, "OK")
 		case "STATUS":
 			// TODO: print 'usage=<n> limit=<n_or_unlimited>'
