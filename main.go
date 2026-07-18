@@ -51,7 +51,7 @@ func main() {
 			// TODO: alloc; print OK or 'OOM <pid>' (don't add bytes on OOM)
 			newPid, _ := strconv.Atoi(parts[2])
 			pSize, _ := strconv.Atoi(parts[3])
-			if groups[parts[1]].Limit > 0 && (pSize+groups[parts[1]].Usage) > groups[parts[1]].Limit {
+			if groups[parts[1]].Limit >= 0 && (pSize+groups[parts[1]].Usage) > groups[parts[1]].Limit {
 				out = append(out, fmt.Sprintf("OOM %d", newPid))
 			} else {
 				g := groups[parts[1]]
@@ -77,7 +77,7 @@ func main() {
 		case "STATUS":
 			// TODO: print 'usage=<n> limit=<n_or_unlimited>'
 			limit := "unlimited"
-			if groups[parts[1]].Limit > 0 {
+			if groups[parts[1]].Limit >= 0 {
 				limit = strconv.Itoa(groups[parts[1]].Limit)
 			}
 			out = append(out, fmt.Sprintf("usage=%s limit=%s", strconv.Itoa(groups[parts[1]].Usage), limit))
