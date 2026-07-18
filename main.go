@@ -76,7 +76,7 @@ func main() {
 		case "STATUS":
 			// TODO: print 'usage=<n> limit=<n_or_unlimited>'
 			limit := "unlimited"
-			if groups[parts[1]].Usage > 0 {
+			if groups[parts[1]].Limit > 0 {
 				limit = strconv.Itoa(groups[parts[1]].Limit)
 			}
 			out = append(out, fmt.Sprintf("usage=%s limit=%s", strconv.Itoa(groups[parts[1]].Usage), limit))
