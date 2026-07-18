@@ -3,30 +3,31 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"net/netip"
 	"os"
-	"strconv"
+	"sort"
 	"strings"
 )
 
-// IPC Namespace Isolation
-// Per-ns SysV shm and message queues. Ids are globally unique, keys are per-ns.
+// veth + Bridge + NAT Router
+// Bridges with gateway IPs, netns with veth attachment, routing decision per packet.
 // Commands:
-//   NEWNS  -> new ns; print id
-//   SHMGET <ns> <key> <size>  -> OK <id> or EEXIST
-//   SHMLIST <ns>  -> '<id> <key> <size>' sorted by id
-//   MSGGET <ns> <key>  -> OK <id> or EEXIST
-//   MSGSEND <ns> <qid> <msg>  -> enqueue; OK
-//   MSGRECV <ns> <qid>  -> dequeue head; print msg or EMPTY
-//   PEEK <ns_a> <ns_b> <key>  -> 1 if visible in ns_b, else 0 (0 if ns_a != ns_b)
+//   BRIDGE <name> <gw_ip>  -> create bridge; OK
+//   NETNS <name>  -> create netns; OK
+//   VETH <bridge> <netns> <ns_ip>  -> create veth pair; OK
+//   ROUTE <netns> <cidr>  -> add direct route; OK
+//   SEND <netns> <dst_ip>  -> DIRECT, NAT, or NO ROUTE
+//   SHOW-BRIDGE <name>  -> '<netns> <ns_ip>' sorted by netns
 
-type IdKey struct {
-	Namespace int
-	Key       string
+type Bridge struct {
+	Gateway      netip.Addr
+	AttachedNses map[string]netip.Addr
 }
 
-type IPC struct {
-	Mem    map[string]int
-	Queues map[string][]string
+type NetNamespace struct {
+	MyAddr  netip.Addr
+	Gateway netip.Addr
+	Routes  []netip.Prefix
 }
 
 func main() {
@@ -34,9 +35,8 @@ func main() {
 	sc.Buffer(make([]byte, 1<<20), 1<<24)
 	var out []string
 	// TODO: declare your state structures here
-	var namespaces []IPC
-	var memIds []IdKey
-	var queueIds []IdKey
+	bridges := map[string]Bridge{}
+	namespaces := map[string]NetNamespace{}
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" {
@@ -44,72 +44,58 @@ func main() {
 		}
 		parts := strings.Fields(line)
 		switch parts[0] {
-		case "NEWNS":
-			// TODO: new ns; print id
-			namespaces = append(namespaces, IPC{map[string]int{}, map[string][]string{}})
-			out = append(out, strconv.Itoa(len(namespaces)))
-		case "SHMGET":
-			// TODO: OK <id> or EEXIST
-			nsId, _ := strconv.Atoi(parts[1])
-			if _, exists := namespaces[nsId-1].Mem[parts[2]]; exists {
-				out = append(out, "EEXIST")
-			} else {
-				size, _ := strconv.Atoi(parts[3])
-				namespaces[nsId-1].Mem[parts[2]] = size
-				memIds = append(memIds, IdKey{nsId - 1, parts[2]})
-				out = append(out, fmt.Sprintf("OK %d", len(memIds)))
-			}
-		case "SHMLIST":
-			// TODO: '<id> <key> <size>' sorted by id
-			nsId, _ := strconv.Atoi(parts[1])
-			var list []string
-			for i, k := range memIds {
-				if k.Namespace == nsId-1 {
-					list = append(list, fmt.Sprintf("%d %s %d", i+1, k.Key, namespaces[nsId-1].Mem[k.Key]))
-				}
-			}
-			out = append(out, strings.Join(list, "\n"))
-		case "MSGGET":
-			// TODO: OK <id> or EEXIST
-			nsId, _ := strconv.Atoi(parts[1])
-			if _, exists := namespaces[nsId-1].Queues[parts[2]]; exists {
-				out = append(out, "EEXIST")
-			} else {
-				namespaces[nsId-1].Queues[parts[2]] = []string{}
-				queueIds = append(queueIds, IdKey{nsId - 1, parts[2]})
-				out = append(out, fmt.Sprintf("OK %d", len(queueIds)))
-			}
-		case "MSGSEND":
-			// TODO: enqueue; OK
-			nsId, _ := strconv.Atoi(parts[1])
-			qId, _ := strconv.Atoi(parts[2])
-			queueKey := queueIds[qId-1].Key
-			namespaces[nsId-1].Queues[queueKey] = append(namespaces[nsId-1].Queues[queueKey], parts[3])
+		case "BRIDGE":
+			// TODO: create bridge; OK
+			bridges[parts[1]] = Bridge{netip.MustParseAddr(parts[2]), map[string]netip.Addr{}}
 			out = append(out, "OK")
-		case "MSGRECV":
-			// TODO: dequeue head; print msg or EMPTY
-			nsId, _ := strconv.Atoi(parts[1])
-			qId, _ := strconv.Atoi(parts[2])
-			queueKey := queueIds[qId-1].Key
-			if len(namespaces[nsId-1].Queues[queueKey]) > 0 {
-				out = append(out, namespaces[nsId-1].Queues[queueKey][0])
-				namespaces[nsId-1].Queues[queueKey] = namespaces[nsId-1].Queues[queueKey][1:]
-			} else {
-				out = append(out, "EMPTY")
-			}
-		case "PEEK":
-			// TODO: 1 if visible in ns_b, else 0 (0 if ns_a != ns_b)
-			ns1, _ := strconv.Atoi(parts[1])
-			ns2, _ := strconv.Atoi(parts[2])
-			if ns1 != ns2 {
-				out = append(out, "0")
-			} else {
-				if _, found := namespaces[ns1-1].Mem[parts[3]]; found {
-					out = append(out, "1")
-				} else {
-					out = append(out, "0")
+		case "NETNS":
+			// TODO: create netns; OK
+			namespaces[parts[1]] = NetNamespace{netip.IPv4Unspecified(), netip.IPv4Unspecified(), []netip.Prefix{}}
+			out = append(out, "OK")
+		case "VETH":
+			// TODO: create veth pair; OK
+			bridge := bridges[parts[1]]
+			virtAddr := netip.MustParseAddr(parts[3])
+			bridge.AttachedNses[parts[2]] = virtAddr
+			bridges[parts[1]] = bridge
+			ns := namespaces[parts[2]]
+			ns.MyAddr = virtAddr
+			ns.Gateway = bridge.Gateway
+			namespaces[parts[2]] = ns
+			out = append(out, "OK")
+		case "ROUTE":
+			// TODO: add direct route; OK
+			ns := namespaces[parts[1]]
+			ns.Routes = append(ns.Routes, netip.MustParsePrefix(parts[2]))
+			namespaces[parts[1]] = ns
+			out = append(out, "OK")
+		case "SEND":
+			// TODO: DIRECT, NAT, or NO ROUTE
+			dst := netip.MustParseAddr(parts[2])
+			ns := namespaces[parts[1]]
+			rte := "NO ROUTE"
+			for _, r := range ns.Routes {
+				if r.Contains(dst) {
+					rte = fmt.Sprintf("DIRECT from %s to %s", ns.MyAddr, dst)
 				}
 			}
+			if rte == "NO ROUTE" && ns.Gateway != netip.IPv4Unspecified() {
+				rte = fmt.Sprintf("NAT from %s via %s to %s", ns.MyAddr, ns.Gateway, dst)
+			}
+			out = append(out, rte)
+		case "SHOW-BRIDGE":
+			// TODO: '<netns> <ns_ip>' sorted by netns
+			bridge := bridges[parts[1]]
+			var keys []string
+			var veths []string
+			for k, _ := range bridge.AttachedNses {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				veths = append(veths, fmt.Sprintf("%s %s", k, namespaces[k].MyAddr))
+			}
+			out = append(out, strings.Join(veths, "\n"))
 		}
 	}
 	fmt.Println(strings.Join(out, "\n"))
