@@ -4,23 +4,27 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 )
 
-// Network Namespace Simulator
-// Each netns has its own interfaces (starts with lo 127.0.0.1) and routes.
+// User Namespace Translator
+// Bidirectional uid_map: in-ns id <-> host id, via ranges (in, host, length).
 // Commands:
-//   NEWNS  -> create new netns with lo 127.0.0.1; print id
-//   IFACE-ADD <ns> <name> <ip>  -> add interface; print OK
-//   IFACE-LIST <ns>  -> print '<name> <ip>' sorted by name
-//   ROUTE-ADD <ns> <dst_cidr> <via_iface>  -> add route; print OK
-//   ROUTE-LIST <ns>  -> print '<cidr> via <iface>' sorted by cidr
+//   NEWNS  -> create new userns; print id (1,2,...)
+//   MAP <ns> <in_id> <host_id> <length>  -> append range; OK or 'ERR overlap'
+//   TRANSLATE <ns> <in_id>  -> print host uid or 'unmapped'
+//   WHO <ns> <host_id>  -> print in-ns uid or 'unmapped'
 
-type Namespace struct {
-	Ifaces map[string]string
-	Routes map[string]string
+type UidRange struct {
+	InStart, HostStart, Length int
+}
+
+func isOverlap(existing UidRange, toAdd UidRange) bool {
+	return toAdd.InStart <= existing.InStart+existing.Length ||
+		toAdd.InStart+toAdd.Length >= existing.InStart ||
+		toAdd.HostStart <= existing.HostStart+existing.Length ||
+		toAdd.HostStart+toAdd.Length >= existing.InStart
 }
 
 func main() {
@@ -28,7 +32,7 @@ func main() {
 	sc.Buffer(make([]byte, 1<<20), 1<<24)
 	var out []string
 	// TODO: declare your state structures here
-	var namespaces []Namespace
+	var namespaces [][]UidRange
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" {
@@ -37,49 +41,54 @@ func main() {
 		parts := strings.Fields(line)
 		switch parts[0] {
 		case "NEWNS":
-			// TODO: create new netns with lo 127.0.0.1; print id
-			namespaces = append(namespaces, Namespace{Ifaces: map[string]string{"lo": "127.0.0.1"}, Routes: map[string]string{}})
+			// TODO: create new userns; print id (1,2,...)
+			namespaces = append(namespaces, []UidRange{})
 			out = append(out, strconv.Itoa(len(namespaces)))
-		case "IFACE-ADD":
-			// TODO: add interface; print OK
+		case "MAP":
+			// TODO: append range; OK or 'ERR overlap'
+			// For a new interval, overlaps exist if:
+			// new id <= existing id + length
+			// new id + length >= existing id
+			// This could happen for both in-ns *and* host ranges
 			nsId, _ := strconv.Atoi(parts[1])
-			name := parts[2]
-			ip := parts[3]
-			namespaces[nsId-1].Ifaces[name] = ip
-			out = append(out, "OK")
-		case "IFACE-LIST":
-			// TODO: print '<name> <ip>' sorted by name
+			inId, _ := strconv.Atoi(parts[2])
+			hostId, _ := strconv.Atoi(parts[3])
+			length, _ := strconv.Atoi(parts[4])
+			newRange := UidRange{inId, hostId, length}
+			overlapFound := false
+			for _, r := range namespaces[nsId-1] {
+				overlapFound = overlapFound || isOverlap(r, newRange)
+			}
+			if overlapFound {
+				out = append(out, "ERR overlap")
+			} else {
+				namespaces[nsId-1] = append(namespaces[nsId-1], newRange)
+				out = append(out, "OK")
+			}
+		case "TRANSLATE":
+			// TODO: print host uid or 'unmapped'
 			nsId, _ := strconv.Atoi(parts[1])
-			var ifaces []string
-			var keys []string
-			for k := range namespaces[nsId-1].Ifaces {
-				keys = append(keys, k)
+			inId, _ := strconv.Atoi(parts[2])
+			res := "unmapped"
+			for _, r := range namespaces[nsId-1] {
+				if inId >= r.InStart && inId < r.InStart+r.Length {
+					res = strconv.Itoa(r.HostStart + inId)
+					break
+				}
 			}
-			sort.Strings(keys)
-			for _, k := range keys {
-				ifaces = append(ifaces, fmt.Sprintf("%s %s", k, namespaces[nsId-1].Ifaces[k]))
-			}
-			out = append(out, strings.Join(ifaces, "\n"))
-		case "ROUTE-ADD":
-			// TODO: add route; print OK
+			out = append(out, res)
+		case "WHO":
+			// TODO: print in-ns uid or 'unmapped'
 			nsId, _ := strconv.Atoi(parts[1])
-			cidr := parts[2]
-			iface := parts[3]
-			namespaces[nsId-1].Routes[cidr] = iface
-			out = append(out, "OK")
-		case "ROUTE-LIST":
-			// TODO: print '<cidr> via <iface>' sorted by cidr
-			nsId, _ := strconv.Atoi(parts[1])
-			var routes []string
-			var keys []string
-			for k := range namespaces[nsId-1].Routes {
-				keys = append(keys, k)
+			hostId, _ := strconv.Atoi(parts[2])
+			res := "unmapped"
+			for _, r := range namespaces[nsId-1] {
+				if hostId >= r.HostStart && hostId < r.HostStart+r.Length {
+					res = strconv.Itoa(r.InStart + hostId)
+					break
+				}
 			}
-			sort.Strings(keys)
-			for _, k := range keys {
-				routes = append(routes, fmt.Sprintf("%s via %s", k, namespaces[nsId-1].Routes[k]))
-			}
-			out = append(out, strings.Join(routes, "\n"))
+			out = append(out, res)
 		}
 	}
 	fmt.Println(strings.Join(out, "\n"))
