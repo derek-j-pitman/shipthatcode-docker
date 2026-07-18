@@ -102,8 +102,12 @@ func main() {
 			// TODO: dequeue head; print msg or EMPTY
 			nsId, _ := strconv.Atoi(parts[1])
 			qId, _ := strconv.Atoi(parts[2])
-			out = append(out, namespaces[nsId-1].Queues[qId].Messages[0])
-			namespaces[nsId-1].Queues[qId].Messages = namespaces[nsId-1].Queues[qId].Messages[1:]
+			if len(namespaces[nsId-1].Queues[qId].Messages) > 0 {
+				out = append(out, namespaces[nsId-1].Queues[qId].Messages[0])
+				namespaces[nsId-1].Queues[qId].Messages = namespaces[nsId-1].Queues[qId].Messages[1:]
+			} else {
+				out = append(out, "EMPTY")
+			}
 		case "PEEK":
 			// TODO: 1 if visible in ns_b, else 0 (0 if ns_a != ns_b)
 			ns1, _ := strconv.Atoi(parts[1])
@@ -113,7 +117,7 @@ func main() {
 			} else {
 				found := false
 				for _, k := range namespaces[ns1-1].Mem {
-					if k.Key == parts[2] {
+					if k.Key == parts[3] {
 						found = true
 						break
 					}
