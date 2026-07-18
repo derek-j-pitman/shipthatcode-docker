@@ -20,11 +20,8 @@ type UidRange struct {
 	InStart, HostStart, Length int
 }
 
-func isOverlap(existing UidRange, toAdd UidRange) bool {
-	return toAdd.InStart <= existing.InStart+existing.Length ||
-		toAdd.InStart+toAdd.Length >= existing.InStart ||
-		toAdd.HostStart <= existing.HostStart+existing.Length ||
-		toAdd.HostStart+toAdd.Length >= existing.InStart
+func isOverlap(lower int, lowerLen int, upper int, upperLen int) bool {
+	return upper < lower+lowerLen || lower > upper+upperLen
 }
 
 func main() {
@@ -57,7 +54,31 @@ func main() {
 			newRange := UidRange{inId, hostId, length}
 			overlapFound := false
 			for _, r := range namespaces[nsId-1] {
-				overlapFound = overlapFound || isOverlap(r, newRange)
+				var lo, loLen, hi, hiLen int
+				if r.InStart < newRange.InStart {
+					lo = r.InStart
+					loLen = r.Length
+					hi = newRange.InStart
+					hiLen = newRange.Length
+				} else {
+					lo = newRange.InStart
+					loLen = newRange.Length
+					hi = r.InStart
+					hiLen = r.Length
+				}
+				overlapFound = overlapFound || isOverlap(lo, loLen, hi, hiLen)
+				if r.HostStart < newRange.HostStart {
+					lo = r.HostStart
+					loLen = r.Length
+					hi = newRange.HostStart
+					hiLen = newRange.Length
+				} else {
+					lo = newRange.HostStart
+					loLen = newRange.Length
+					hi = r.HostStart
+					hiLen = r.Length
+				}
+				overlapFound = overlapFound || isOverlap(lo, loLen, hi, hiLen)
 			}
 			if overlapFound {
 				out = append(out, "ERR overlap")
