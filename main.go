@@ -3,31 +3,24 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"net"
 	"os"
-	"sort"
+	"strconv"
 	"strings"
 )
 
-// veth + Bridge + NAT Router
-// Bridges with gateway IPs, netns with veth attachment, routing decision per packet.
+// Memory cgroup Simulator
+// Memory cgroup with hard limit. OOM if alloc would exceed limit.
 // Commands:
-//   BRIDGE <name> <gw_ip>  -> create bridge; OK
-//   NETNS <name>  -> create netns; OK
-//   VETH <bridge> <netns> <ns_ip>  -> create veth pair; OK
-//   ROUTE <netns> <cidr>  -> add direct route; OK
-//   SEND <netns> <dst_ip>  -> DIRECT, NAT, or NO ROUTE
-//   SHOW-BRIDGE <name>  -> '<netns> <ns_ip>' sorted by netns
+//   CGROUP <name>  -> create cgroup, no limit; print OK
+//   LIMIT <name> <bytes>  -> set hard limit; print OK
+//   ALLOC <name> <pid> <bytes>  -> alloc; print OK or 'OOM <pid>' (don't add bytes on OOM)
+//   FREE <name> <pid> <bytes>  -> free; print OK
+//   STATUS <name>  -> print 'usage=<n> limit=<n_or_unlimited>'
 
-type Bridge struct {
-	Gateway      net.IP
-	AttachedNses map[string]net.IP
-}
-
-type NetNamespace struct {
-	MyAddr  net.IP
-	Gateway net.IP
-	Routes  []*net.IPNet
+type CGroup struct {
+	Limit  int
+	Usage  int
+	PTable map[int]int
 }
 
 func main() {
@@ -35,8 +28,7 @@ func main() {
 	sc.Buffer(make([]byte, 1<<20), 1<<24)
 	var out []string
 	// TODO: declare your state structures here
-	bridges := map[string]Bridge{}
-	namespaces := map[string]NetNamespace{}
+	groups := map[string]CGroup{}
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" {
@@ -44,59 +36,50 @@ func main() {
 		}
 		parts := strings.Fields(line)
 		switch parts[0] {
-		case "BRIDGE":
-			// TODO: create bridge; OK
-			bridges[parts[1]] = Bridge{net.ParseIP(parts[2]), map[string]net.IP{}}
+		case "CGROUP":
+			// TODO: create cgroup, no limit; print OK
+			groups[parts[1]] = CGroup{-1, 0, map[int]int{}}
 			out = append(out, "OK")
-		case "NETNS":
-			// TODO: create netns; OK
-			namespaces[parts[1]] = NetNamespace{net.IPv4zero, net.IPv4zero, []*net.IPNet{}}
+		case "LIMIT":
+			// TODO: set hard limit; print OK
+			newLimit, _ := strconv.Atoi(parts[2])
+			g := groups[parts[1]]
+			g.Limit = newLimit
+			groups[parts[1]] = g
 			out = append(out, "OK")
-		case "VETH":
-			// TODO: create veth pair; OK
-			bridge := bridges[parts[1]]
-			virtAddr := net.ParseIP(parts[3])
-			bridge.AttachedNses[parts[2]] = virtAddr
-			bridges[parts[1]] = bridge
-			ns := namespaces[parts[2]]
-			ns.MyAddr = virtAddr
-			ns.Gateway = bridge.Gateway
-			namespaces[parts[2]] = ns
+		case "ALLOC":
+			// TODO: alloc; print OK or 'OOM <pid>' (don't add bytes on OOM)
+			newPid, _ := strconv.Atoi(parts[2])
+			pSize, _ := strconv.Atoi(parts[3])
+			if groups[parts[1]].Limit > 0 && (pSize+groups[parts[1]].Usage) > groups[parts[1]].Limit {
+				out = append(out, fmt.Sprintf("OOM %d", newPid))
+			} else {
+				g := groups[parts[1]]
+				g.PTable[newPid] += pSize
+				g.Usage += pSize
+				groups[parts[1]] = g
+				out = append(out, "OK")
+			}
+		case "FREE":
+			// TODO: free; print OK
+			g := groups[parts[1]]
+			pid, _ := strconv.Atoi(parts[2])
+			toFree, _ := strconv.Atoi(parts[3])
+			if g.PTable[pid] <= toFree {
+				g.Usage -= g.PTable[pid]
+				delete(g.PTable, pid)
+			} else {
+				g.PTable[pid] -= toFree
+				g.Usage -= toFree
+			}
 			out = append(out, "OK")
-		case "ROUTE":
-			// TODO: add direct route; OK
-			ns := namespaces[parts[1]]
-			_, cidr, _ := net.ParseCIDR(parts[2])
-			ns.Routes = append(ns.Routes, cidr)
-			namespaces[parts[1]] = ns
-			out = append(out, "OK")
-		case "SEND":
-			// TODO: DIRECT, NAT, or NO ROUTE
-			dst := net.ParseIP(parts[2])
-			ns := namespaces[parts[1]]
-			rte := "NO ROUTE"
-			for _, r := range ns.Routes {
-				if r.Contains(dst) {
-					rte = fmt.Sprintf("DIRECT from %s to %s", ns.MyAddr, dst)
-				}
+		case "STATUS":
+			// TODO: print 'usage=<n> limit=<n_or_unlimited>'
+			limit := "unlimited"
+			if groups[parts[1]].Usage > 0 {
+				limit = strconv.Itoa(groups[parts[1]].Limit)
 			}
-			if rte == "NO ROUTE" && !ns.Gateway.Equal(net.IPv4zero) {
-				rte = fmt.Sprintf("NAT from %s via %s to %s", ns.MyAddr, ns.Gateway, dst)
-			}
-			out = append(out, rte)
-		case "SHOW-BRIDGE":
-			// TODO: '<netns> <ns_ip>' sorted by netns
-			bridge := bridges[parts[1]]
-			var keys []string
-			var veths []string
-			for k := range bridge.AttachedNses {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			for _, k := range keys {
-				veths = append(veths, fmt.Sprintf("%s %s", k, namespaces[k].MyAddr))
-			}
-			out = append(out, strings.Join(veths, "\n"))
+			out = append(out, fmt.Sprintf("usage=%s limit=%s", strconv.Itoa(groups[parts[1]].Usage), limit))
 		}
 	}
 	fmt.Println(strings.Join(out, "\n"))
