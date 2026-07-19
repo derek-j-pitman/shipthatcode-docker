@@ -8,18 +8,17 @@ import (
 	"strings"
 )
 
-// CPU Quota Tracker
-// Quota in microseconds per 100ms period. Throttle when exceeded.
+// PID Limit Enforcement
+// pids.max per cgroup.
 // Commands:
-//   CGROUP <name>  -> default quota=100000; print OK
-//   QUOTA <name> <us>  -> set quota; print OK
-//   RUN <name> <us>  -> consume; print OK or 'THROTTLE <name>' (clamp used to quota)
-//   TICK  -> reset all used to 0; print OK
-//   STATUS <name>  -> print 'used=<n> quota=<n> throttled=<true|false>'
+//   CGROUP <name>  -> create cgroup, no limit; print OK
+//   PIDSMAX <name> <n>  -> set limit; print OK
+//   FORK <name>  -> increment count; print 'OK <count>' or 'EAGAIN'
+//   EXIT <name>  -> decrement count; print 'OK <count>'
+//   STATUS <name>  -> print 'count=<n> max=<n_or_unlimited>'
 
-type CGroup struct {
-	Quota, Used int
-	Throttled   bool
+type PidGroup struct {
+	PidsMax, CurrPids int
 }
 
 func main() {
@@ -27,7 +26,7 @@ func main() {
 	sc.Buffer(make([]byte, 1<<20), 1<<24)
 	var out []string
 	// TODO: declare your state structures here
-	groups := map[string]CGroup{}
+	groups := map[string]PidGroup{}
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" {
@@ -36,42 +35,43 @@ func main() {
 		parts := strings.Fields(line)
 		switch parts[0] {
 		case "CGROUP":
-			// TODO: default quota=100000; print OK
-			groups[parts[1]] = CGroup{Quota: 100000, Used: 0, Throttled: false}
+			// TODO: create cgroup, no limit; print OK
+			groups[parts[1]] = PidGroup{PidsMax: -1, CurrPids: 0}
 			out = append(out, "OK")
-		case "QUOTA":
-			// TODO: set quota; print OK
+		case "PIDSMAX":
+			// TODO: set limit; print OK
+			pidMax, _ := strconv.Atoi(parts[2])
 			g := groups[parts[1]]
-			newQuota, _ := strconv.Atoi(parts[2])
-			g.Quota = newQuota
+			g.PidsMax = pidMax
 			groups[parts[1]] = g
 			out = append(out, "OK")
-		case "RUN":
-			// TODO: consume; print OK or 'THROTTLE <name>' (clamp used to quota)
+		case "FORK":
+			// TODO: increment count; print 'OK <count>' or 'EAGAIN'
 			g := groups[parts[1]]
-			newUs, _ := strconv.Atoi(parts[2])
-			if g.Used+newUs > g.Quota {
-				g.Used = g.Quota
-				g.Throttled = true
-				out = append(out, fmt.Sprintf("THROTTLE %s", parts[1]))
+			if g.PidsMax >= 0 && g.CurrPids >= g.PidsMax {
+				out = append(out, "EAGAIN")
 			} else {
-				g.Used += newUs
-				out = append(out, "OK")
+				g.CurrPids++
+				out = append(out, fmt.Sprintf("OK %d", g.CurrPids))
 			}
 			groups[parts[1]] = g
-		case "TICK":
-			// TODO: reset all used to 0; print OK
-			for k := range groups {
-				g := groups[k]
-				g.Used = 0
-				g.Throttled = false
-				groups[k] = g
-			}
-			out = append(out, "OK")
-		case "STATUS":
-			// TODO: print 'used=<n> quota=<n> throttled=<true|false>'
+		case "EXIT":
+			// TODO: decrement count; print 'OK <count>'
 			g := groups[parts[1]]
-			out = append(out, fmt.Sprintf("used=%d quota=%d throttled=%t", g.Used, g.Quota, g.Throttled))
+			g.CurrPids--
+			if g.CurrPids < 0 {
+				g.CurrPids = 0
+			}
+			groups[parts[1]] = g
+			out = append(out, fmt.Sprintf("OK %d", g.CurrPids))
+		case "STATUS":
+			// TODO: print 'count=<n> max=<n_or_unlimited>'
+			max := "unlimited"
+			g := groups[parts[1]]
+			if g.PidsMax >= 0 {
+				max = strconv.Itoa(g.PidsMax)
+			}
+			out = append(out, fmt.Sprintf("count=%d max=%s", g.CurrPids, max))
 		}
 	}
 	fmt.Println(strings.Join(out, "\n"))
