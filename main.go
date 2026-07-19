@@ -49,10 +49,11 @@ func main() {
 			// TODO: consume; print OK or 'THROTTLE <name>' (clamp used to quota)
 			g := groups[parts[1]]
 			newUs, _ := strconv.Atoi(parts[2])
-			g.Used = min(g.Quota, g.Used+newUs)
-			if g.Used == g.Quota {
+			if g.Used+newUs > g.Quota {
+				g.Used = g.Quota
 				out = append(out, fmt.Sprintf("THROTTLE %s", parts[1]))
 			} else {
+				g.Used += newUs
 				out = append(out, "OK")
 			}
 			groups[parts[1]] = g
