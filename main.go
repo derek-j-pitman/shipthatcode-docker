@@ -8,19 +8,17 @@ import (
 	"strings"
 )
 
-// Memory cgroup Simulator
-// Memory cgroup with hard limit. OOM if alloc would exceed limit.
+// CPU Quota Tracker
+// Quota in microseconds per 100ms period. Throttle when exceeded.
 // Commands:
-//   CGROUP <name>  -> create cgroup, no limit; print OK
-//   LIMIT <name> <bytes>  -> set hard limit; print OK
-//   ALLOC <name> <pid> <bytes>  -> alloc; print OK or 'OOM <pid>' (don't add bytes on OOM)
-//   FREE <name> <pid> <bytes>  -> free; print OK
-//   STATUS <name>  -> print 'usage=<n> limit=<n_or_unlimited>'
+//   CGROUP <name>  -> default quota=100000; print OK
+//   QUOTA <name> <us>  -> set quota; print OK
+//   RUN <name> <us>  -> consume; print OK or 'THROTTLE <name>' (clamp used to quota)
+//   TICK  -> reset all used to 0; print OK
+//   STATUS <name>  -> print 'used=<n> quota=<n> throttled=<true|false>'
 
 type CGroup struct {
-	Limit  int
-	Usage  int
-	PTable map[int]int
+	Quota, Used int
 }
 
 func main() {
@@ -37,50 +35,39 @@ func main() {
 		parts := strings.Fields(line)
 		switch parts[0] {
 		case "CGROUP":
-			// TODO: create cgroup, no limit; print OK
-			groups[parts[1]] = CGroup{-1, 0, map[int]int{}}
+			// TODO: default quota=100000; print OK
+			groups[parts[1]] = CGroup{Quota: 100000, Used: 0}
 			out = append(out, "OK")
-		case "LIMIT":
-			// TODO: set hard limit; print OK
-			newLimit, _ := strconv.Atoi(parts[2])
+		case "QUOTA":
+			// TODO: set quota; print OK
 			g := groups[parts[1]]
-			g.Limit = newLimit
+			newQuota, _ := strconv.Atoi(parts[2])
+			g.Quota = newQuota
 			groups[parts[1]] = g
 			out = append(out, "OK")
-		case "ALLOC":
-			// TODO: alloc; print OK or 'OOM <pid>' (don't add bytes on OOM)
-			newPid, _ := strconv.Atoi(parts[2])
-			pSize, _ := strconv.Atoi(parts[3])
-			if groups[parts[1]].Limit >= 0 && (pSize+groups[parts[1]].Usage) > groups[parts[1]].Limit {
-				out = append(out, fmt.Sprintf("OOM %d", newPid))
+		case "RUN":
+			// TODO: consume; print OK or 'THROTTLE <name>' (clamp used to quota)
+			g := groups[parts[1]]
+			newUs, _ := strconv.Atoi(parts[2])
+			g.Used = min(g.Quota, g.Used+newUs)
+			if g.Used == g.Quota {
+				out = append(out, fmt.Sprintf("THROTTLE %s", parts[1]))
 			} else {
-				g := groups[parts[1]]
-				g.PTable[newPid] += pSize
-				g.Usage += pSize
-				groups[parts[1]] = g
 				out = append(out, "OK")
 			}
-		case "FREE":
-			// TODO: free; print OK
-			g := groups[parts[1]]
-			pid, _ := strconv.Atoi(parts[2])
-			toFree, _ := strconv.Atoi(parts[3])
-			if g.PTable[pid] <= toFree {
-				g.Usage -= g.PTable[pid]
-				delete(g.PTable, pid)
-			} else {
-				g.PTable[pid] -= toFree
-				g.Usage -= toFree
-			}
 			groups[parts[1]] = g
+		case "TICK":
+			// TODO: reset all used to 0; print OK
+			for k := range groups {
+				g := groups[k]
+				g.Used = 0
+				groups[k] = g
+			}
 			out = append(out, "OK")
 		case "STATUS":
-			// TODO: print 'usage=<n> limit=<n_or_unlimited>'
-			limit := "unlimited"
-			if groups[parts[1]].Limit >= 0 {
-				limit = strconv.Itoa(groups[parts[1]].Limit)
-			}
-			out = append(out, fmt.Sprintf("usage=%s limit=%s", strconv.Itoa(groups[parts[1]].Usage), limit))
+			// TODO: print 'used=<n> quota=<n> throttled=<true|false>'
+			g := groups[parts[1]]
+			out = append(out, fmt.Sprintf("used=%d quota=%d throttled=%t", g.Used, g.Quota, g.Used == g.Quota))
 		}
 	}
 	fmt.Println(strings.Join(out, "\n"))
