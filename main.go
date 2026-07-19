@@ -19,6 +19,7 @@ import (
 
 type CGroup struct {
 	Quota, Used int
+	Throttled   bool
 }
 
 func main() {
@@ -36,7 +37,7 @@ func main() {
 		switch parts[0] {
 		case "CGROUP":
 			// TODO: default quota=100000; print OK
-			groups[parts[1]] = CGroup{Quota: 100000, Used: 0}
+			groups[parts[1]] = CGroup{Quota: 100000, Used: 0, Throttled: false}
 			out = append(out, "OK")
 		case "QUOTA":
 			// TODO: set quota; print OK
@@ -51,6 +52,7 @@ func main() {
 			newUs, _ := strconv.Atoi(parts[2])
 			if g.Used+newUs > g.Quota {
 				g.Used = g.Quota
+				g.Throttled = true
 				out = append(out, fmt.Sprintf("THROTTLE %s", parts[1]))
 			} else {
 				g.Used += newUs
@@ -62,13 +64,14 @@ func main() {
 			for k := range groups {
 				g := groups[k]
 				g.Used = 0
+				g.Throttled = false
 				groups[k] = g
 			}
 			out = append(out, "OK")
 		case "STATUS":
 			// TODO: print 'used=<n> quota=<n> throttled=<true|false>'
 			g := groups[parts[1]]
-			out = append(out, fmt.Sprintf("used=%d quota=%d throttled=%t", g.Used, g.Quota, g.Used == g.Quota))
+			out = append(out, fmt.Sprintf("used=%d quota=%d throttled=%t", g.Used, g.Quota, g.Throttled))
 		}
 	}
 	fmt.Println(strings.Join(out, "\n"))
